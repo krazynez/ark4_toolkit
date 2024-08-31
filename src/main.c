@@ -14,7 +14,6 @@ PSP_MODULE_INFO("Krazy_toolkit", 0, 1, 0);
 PSP_MAIN_THREAD_ATTR(0);
 
 VlfText vlf_texts[vlf_text_items];
-VlfText triangle[16];
 VlfPicture vlf_picture = NULL;
 VlfProgressBar vlf_progressbar = NULL;
 int showback_prev = 0;
@@ -25,6 +24,7 @@ char *ebootpath;
 static u8 big_buf[10485760] __attribute__((aligned(0x40)));
 static u32 EBOOT_PSAR = 0;
 VlfText titletext = NULL;
+VlfText triangle = NULL;
 VlfPicture titlepicture = NULL;
 char *mode = "Main";
 int selitem = 0;
@@ -366,6 +366,8 @@ void LoadWave()
 
 void OnMainMenuSelectDesc() {
 	int sel = vlfGuiCentralMenuSelection();
+	vlfGuiRemoveText(triangle);
+	ResetScreen(0, 0, 0);
 	if (waiticon == NULL) {
 		ErrorReturn(desc[sel]);
 		mode = "Main";
@@ -530,7 +532,7 @@ void MainMenu(int sel) {
     	va_end(list);
 		*/
 		vlfGuiChangeCharacterByButton('*', VLF_TRIANGLE);
-    	vlfGuiAddText(20, 250, "* for Description");
+    	triangle = vlfGuiAddText(20, 250, "* for Description");
 		//vlfGuiSetTextXY(triangle, 3, 10);
 		//vlfGuiAddText(20, 250, "Z for description");
     	/*int ret = vlfGuiAddEventHandler(PSP_CTRL_TRIANGLE, 0, OnMainMenuSelectDesc(sel), NULL);
