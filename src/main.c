@@ -10,7 +10,7 @@
 #include "inc/vlf.h"
 #define vlf_text_items 20
 
-PSP_MODULE_INFO("Krazy_toolkit", 0, 1, 0);
+PSP_MODULE_INFO("Krazy Toolkit", 0, 1, 0);
 PSP_MAIN_THREAD_ATTR(0);
 
 VlfText vlf_texts[vlf_text_items];
