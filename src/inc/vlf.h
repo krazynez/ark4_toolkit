@@ -58,7 +58,7 @@ enum VlfButtonIcon
 	VLF_CROSS = 2,
 	VLF_CIRCLE = 3,
 	VLF_TRIANGLE = 4,
-	VLF_SQUARE = 5
+	VLF_SQUARE = 5 // does not work :-(
 };
 /** Fade modes */
 

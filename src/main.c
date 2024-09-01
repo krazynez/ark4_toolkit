@@ -5,6 +5,8 @@
 #include <zlib.h>
 #include <stdarg.h>
 #include <stdio.h>
+#include <unistd.h>
+#include <time.h>
 
 #include "inc/common.h"
 #include "inc/vlf.h"
@@ -25,6 +27,8 @@ static u8 big_buf[10485760] __attribute__((aligned(0x40)));
 static u32 EBOOT_PSAR = 0;
 VlfText titletext = NULL;
 VlfText triangle = NULL;
+VlfText lt = NULL;
+VlfText quote = NULL;
 VlfPicture titlepicture = NULL;
 char *mode = "Main";
 int selitem = 0;
@@ -239,6 +243,7 @@ char *pkg_list[] = {
 			"Wallpaper Dumper",
 			"Theme Dumper",
 			"ChronoSwitch",
+			"YABT",
 			"Exit",
 };
 
@@ -249,6 +254,7 @@ char *desc[] = {
 		"Wallpaper Dumper was initally created due to someone on reddit loosing there relative.\nI created this because the phone on their PSP to preserve the image for them.\n",
 		"Theme Dumper is pretty much a 1:1 replica of Wallpaper Dumper,\nbut used to dump OFW themes (PTF).\nThough this can be used to dump CTF's as well.\n",
 		"Chronoswitch originally created by Davee, then forked and updated by The Zett.\nI forked and updated to add support for GO to check for the update\nvia ef0/ms0 as well all checking for any EBOOT.PBP at all in /GAME/UPDATE",
+		"YABT ( Yet Another Button Tester ), I made just for fun to see what I could make. Was more like a Hello World for all the user buttons.",
 };
 
 int size = (sizeof(pkg_list)/sizeof(pkg_list[0]))-1;
@@ -367,6 +373,7 @@ void LoadWave()
 void OnMainMenuSelectDesc() {
 	int sel = vlfGuiCentralMenuSelection();
 	vlfGuiRemoveText(triangle);
+	vlfGuiRemoveText(lt);
 	ResetScreen(0, 0, 0);
 	if (waiticon == NULL) {
 		ErrorReturn(desc[sel]);
@@ -511,6 +518,26 @@ void OnMainMenuSelect(int sel) {
 						return;
 					}
 				}
+				else if(sel == 6) {
+					mode = "YABT";
+					int cont = vlfGuiMessageDialog("Do you want to install YABT?", VLF_MD_TYPE_NORMAL|VLF_MD_BUTTONS_YESNO|VLF_MD_INITIAL_CURSOR_NO);
+					if(cont != 1) {
+						mode = "Main";
+						ResetScreen(1, 0, sel);
+						return;
+					}
+					else {
+						memset(big_buf, 0, sizeof(big_buf));
+						char outname[128];
+						char filetodump[] = "YABT/EBOOT.PBP";
+						sprintf(outname, "ms0:/PSP/GAME/YABT/EBOOT.PBP");
+						zipFileExtract(path, EBOOT_PSAR, filetodump, outname);
+						ErrorReturn("%s successfully installed.", mode);
+						mode = "Main";
+						ResetScreen(1, 0, sel);
+						return;
+					}
+				}
 
 				
 
@@ -527,25 +554,13 @@ void MainMenu(int sel) {
 	if(mode == "Main") {
 		vlfGuiCentralMenu(size, pkg_list, sel, OnMainMenuSelect, 0, 0);
 		
-    	/*va_start(list, fmt);
-    	vsprintf(msg, fmt, list);
-    	va_end(list);
-		*/
-		vlfGuiChangeCharacterByButton('*', VLF_TRIANGLE);
-    	triangle = vlfGuiAddText(20, 250, "* for Description");
-		//vlfGuiSetTextXY(triangle, 3, 10);
-		//vlfGuiAddText(20, 250, "Z for description");
-    	/*int ret = vlfGuiAddEventHandler(PSP_CTRL_TRIANGLE, 0, OnMainMenuSelectDesc(sel), NULL);
-		if(ret) {
-			mode = "Main";
-			ResetScreen(1, 0, sel);
-			return;
-		}
-		*/
+
+		vlfGuiChangeCharacterByButton('-', VLF_TRIANGLE);
+    	triangle = vlfGuiAddText(20, 250, "- for Description");
+    	lt = vlfGuiAddText(310, 250, "LT change bg color");
+
 	}
 
-	//int btn = GetKeyPress(0);
-	//if(btn & PSP_CTRL_TRIANGLE)
 	vlfGuiSetRectangleFade(0, VLF_TITLEBAR_HEIGHT, 480, 272-VLF_TITLEBAR_HEIGHT, VLF_FADE_MODE_IN, VLF_FADE_SPEED_VERY_FAST, 0, NULL, NULL, 0);
 	return;
 	
@@ -562,9 +577,14 @@ void ResetScreen(int showmenu, int showback, int sel)
     
 	selitem = sel;
     if(showmenu==1){MainMenu(sel);}
-    //if(showmenu==2){OnMainMenuSelectDesc(sel);}
 }
 
+void setup() {
+	time_t start = time(NULL);
+	while(time(NULL) - start < 4) {
+		vlfGuiDrawFrame();
+	}
+}
 
 int app_main(int argc, char *args[]) {
 
@@ -584,8 +604,14 @@ int app_main(int argc, char *args[]) {
     
     LoadWave();
     SetBackground();
-    vlfGuiAddEventHandler(PSP_CTRL_SQUARE, 0, SetBackground, NULL);
+    vlfGuiAddEventHandler(PSP_CTRL_LTRIGGER, 0, SetBackground, NULL);
     vlfGuiAddEventHandler(PSP_CTRL_TRIANGLE, 0, OnMainMenuSelectDesc, NULL);
+
+	ResetScreen(0, 0, 0);
+    quote = vlfGuiAddText(120, 120, "I've got all your PSP needz...");
+	setup();
+	vlfGuiRemoveText(quote);
+	
 
 	//int btn = GetKeyPress(0);
 	ResetScreen(1, 0, 0);
