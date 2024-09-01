@@ -28,4 +28,4 @@ Credits:
 
 - Davee and TheZett for amazing work of ChronoSwitch has been fun adding to it and more to come for sure. Damn GO always causing issues.
 
-- Total Kommando for giving me this inital idea ( though was slightly different from what you expected it to be )
+- Total Kommando for Icons and giving me this inital idea ( though was slightly different from what you expected it to be )
