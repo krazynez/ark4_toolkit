@@ -10,6 +10,7 @@
 
 #include "inc/common.h"
 #include "inc/vlf.h"
+#include "inc/kubridge.h"
 #define vlf_text_items 20
 
 PSP_MODULE_INFO("Krazy Toolkit", 0, 1, 0);
@@ -29,6 +30,7 @@ VlfText titletext = NULL;
 VlfText triangle = NULL;
 VlfText lt = NULL;
 VlfText quote = NULL;
+VlfText extract = NULL;
 VlfPicture titlepicture = NULL;
 char *mode = "Main";
 int selitem = 0;
@@ -237,14 +239,14 @@ int zipFileExtract(char *archivepath, int archiveoffs, char *filename, char *out
 }
 
 char *pkg_list[] = {
-			"PSP Tool 1.69 (Will take a bit to extract)",
+			"PSP Tool 1.69",
 			"UMDRescue",
 			"UMDRescue (1.50 kxploit)",
 			"Wallpaper Dumper",
 			"Theme Dumper",
 			"ChronoSwitch",
 			"YABT",
-			"Exit",
+			"6.61 OFW",
 };
 
 char *desc[] = {
@@ -255,9 +257,10 @@ char *desc[] = {
 		"Theme Dumper is pretty much a 1:1 replica of Wallpaper Dumper,\nbut used to dump OFW themes (PTF).\nThough this can be used to dump CTF's as well.\n",
 		"Chronoswitch originally created by Davee, then forked and updated by The Zett.\nI forked and updated to add support for GO to check for the update\nvia ef0/ms0 as well all checking for any EBOOT.PBP at all in /GAME/UPDATE",
 		"YABT ( Yet Another Button Tester ), I made just for fun to see what I could make. Was more like a Hello World for all the user buttons.",
+		"OFW (Official Firmware), 6.61 for both Standard PSP and PSP GO. Will prompt to extract to ms0:/PSP/GAME/UPDATE and also the root fileystem (i.e ms0:/661.PBP)",
 };
 
-int size = (sizeof(pkg_list)/sizeof(pkg_list[0]))-1;
+int menu_size = (sizeof(pkg_list)/sizeof(pkg_list[0]))-1;
 int desc_size = (sizeof(desc)/sizeof(desc[0]))-1;
 
 
@@ -400,7 +403,11 @@ void OnMainMenuSelect(int sel) {
 						char outname[128];
 						char filetodump[] = "psptool/EBOOT.PBP";
 						sprintf(outname, "ms0:/PSP/GAME/PSP_Tool/EBOOT.PBP");
+						ResetScreen(0, 0, 0);
+						extract = vlfGuiAddText(120, 120, "Extracting... Please Wait...");
+						vlfGuiDrawFrame();
 						zipFileExtract(path, EBOOT_PSAR, filetodump, outname);
+						vlfGuiRemoveText(extract);
 						ErrorReturn("%s successfully installed.", mode);
 						mode = "Main";
 						ResetScreen(1, 0, sel);
@@ -538,9 +545,93 @@ void OnMainMenuSelect(int sel) {
 						return;
 					}
 				}
+				else if(sel == 7) {
+					mode = "OFW";
+					int model = kuKernelGetModel();
+					int cont = -1;
+					if(model == 4) {
+						cont = vlfGuiMessageDialog("Do you want to extract 6.61 GO OFW to PSP/GAME/UPDATE/ ?", VLF_MD_TYPE_NORMAL|VLF_MD_BUTTONS_YESNO|VLF_MD_INITIAL_CURSOR_NO);
+						if(cont == 1) {
+							ResetScreen(0, 0, 0);
+							extract = vlfGuiAddText(120, 120, "Extracting... Please Wait...");
+							vlfGuiDrawFrame();
+							memset(big_buf, 0, sizeof(big_buf));
+							char outname[128];
+							char filetodump[] = "OFW/GO/EBOOT.PBP";
+							sprintf(outname, "ms0:/PSP/GAME/UPDATE/EBOOT.PBP");
+							zipFileExtract(path, EBOOT_PSAR, filetodump, outname);
+						    vlfGuiRemoveText(extract);
+							ErrorReturn("%s successfully installed.", mode);
+							vlfGuiRemoveText(extract);
+						}
+						cont = -1;
 
-				
+						cont = vlfGuiMessageDialog("Do you want to extract 6.61GO.PBP OFW to to root of the Memory Stick?", VLF_MD_TYPE_NORMAL|VLF_MD_BUTTONS_YESNO|VLF_MD_INITIAL_CURSOR_NO);
+						if(cont == 1) {
+							memset(big_buf, 0, sizeof(big_buf));
+							char outname[128];
+							char filetodump[] = "OFW/GO/EBOOT.PBP";
+							sprintf(outname, "ms0:/661GO.PBP");
+							ResetScreen(0, 0, 0);
+							extract = vlfGuiAddText(120, 120, "Extracting... Please Wait...");
+							vlfGuiDrawFrame();
+							zipFileExtract(path, EBOOT_PSAR, filetodump, outname);
+						    vlfGuiRemoveText(extract);
+							ErrorReturn("%s successfully installed.", mode);
+							mode = "Main";
+							ResetScreen(1, 0, sel);
+							return;
+						}
+						else {
+							mode = "Main";
+							ResetScreen(1, 0, sel);
+							return;
+						}
+					}
+					else {
+						cont = vlfGuiMessageDialog("Do you want to extract 6.61 OFW to PSP/GAME/UPDATE/ ?", VLF_MD_TYPE_NORMAL|VLF_MD_BUTTONS_YESNO|VLF_MD_INITIAL_CURSOR_NO);
+						if(cont == 1) {
+							memset(big_buf, 0, sizeof(big_buf));
+							char outname[128];
+							char filetodump[] = "OFW/X000/EBOOT.PBP";
+							sprintf(outname, "ms0:/PSP/GAME/UPDATE/EBOOT.PBP");
+							ResetScreen(0, 0, 0);
+							extract = vlfGuiAddText(120, 120, "Extracting... Please Wait...");
+							vlfGuiDrawFrame();
+							zipFileExtract(path, EBOOT_PSAR, filetodump, outname);
+						    vlfGuiRemoveText(extract);
+							ErrorReturn("%s successfully installed.", mode);
+						}
 
+						cont = -1;
+						cont = vlfGuiMessageDialog("Do you want to extract 6.61.PBP OFW to to root of the Memory Stick?", VLF_MD_TYPE_NORMAL|VLF_MD_BUTTONS_YESNO|VLF_MD_INITIAL_CURSOR_NO);
+						if(cont == 1) {
+							memset(big_buf, 0, sizeof(big_buf));
+							char outname[128];
+							char filetodump[] = "OFW/X000/EBOOT.PBP";
+							sprintf(outname, "ms0:/661.PBP");
+							ResetScreen(0, 0, 0);
+							extract = vlfGuiAddText(120, 120, "Extracting... Please Wait...");
+							vlfGuiDrawFrame();
+							zipFileExtract(path, EBOOT_PSAR, filetodump, outname);
+						    vlfGuiRemoveText(extract);
+							ErrorReturn("%s successfully installed.", mode);
+							mode = "Main";
+							ResetScreen(1, 0, sel);
+							return;
+						}
+						else {
+							mode = "Main";
+							ResetScreen(1, 0, sel);
+							return;
+						}
+
+
+
+
+					}
+					
+				}
 		}
 
     if(waiticon != NULL){waiticon = vlfGuiRemoveShadowedPicture(waiticon);}
@@ -552,8 +643,7 @@ void OnMainMenuSelect(int sel) {
 void MainMenu(int sel) {
 
 	if(mode == "Main") {
-		vlfGuiCentralMenu(size, pkg_list, sel, OnMainMenuSelect, 0, 0);
-		
+		vlfGuiCentralMenu(menu_size+1, pkg_list, sel, OnMainMenuSelect, 0, 0);
 
 		vlfGuiChangeCharacterByButton('-', VLF_TRIANGLE);
     	triangle = vlfGuiAddText(20, 250, "- for Description");
