@@ -19,6 +19,8 @@ __Projects include:__
 
 - [X] YABT ( Yet Another Button Tester )
 
+- [X] OFW, model detection of which one to add to the Memory Stick
+
 Credits:
 - raing3 for PSP Tool to reference as I made both PSP Tool 1.69 and this for vlf lib
 
