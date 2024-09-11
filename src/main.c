@@ -11,14 +11,15 @@
 #include "inc/common.h"
 #include "inc/vlf.h"
 #include "inc/kubridge.h"
+#include "ARK4_HEADERS.h"
 #define vlf_text_items 20
 
-PSP_MODULE_INFO("Krazy Toolkit", 0, 1, 0);
+PSP_MODULE_INFO("ARK-4 Toolkit", 0, 1, 0);
 PSP_MAIN_THREAD_ATTR(0);
 
-VlfText vlf_texts[vlf_text_items];
-VlfPicture vlf_picture = NULL;
-VlfProgressBar vlf_progressbar = NULL;
+//VlfText vlf_texts[vlf_text_items];
+//VlfPicture vlf_picture = NULL;
+//VlfProgressBar vlf_progressbar = NULL;
 int showback_prev = 0;
 int showenter_prev = 0;
 
@@ -27,13 +28,11 @@ char *ebootpath;
 static u8 big_buf[10485760] __attribute__((aligned(0x40)));
 static u32 EBOOT_PSAR = 0;
 VlfText titletext = NULL;
-VlfText triangle = NULL;
 VlfText lt = NULL;
 VlfText quote = NULL;
 VlfText extract = NULL;
 VlfPicture titlepicture = NULL;
 char *mode = "Main";
-int selitem = 0;
 
 VlfShadowedPicture waiticon = NULL;
 int bguseflash = 0;
@@ -110,7 +109,7 @@ int WriteFile(char *file, int seek, char *buf, int size)
 	return written;
 }
 
-#define CHUNK_SIZE 8192  // 8KB buffer size
+#define CHUNK_SIZE 512  // 8KB buffer size
 
 int zipFileExtract(char *archivepath, int archiveoffs, char *filename, char *outputpath) {
     struct SZIPFileHeader data;
@@ -147,7 +146,7 @@ int zipFileExtract(char *archivepath, int archiveoffs, char *filename, char *out
             sceIoLseek(fd, data.DataDescriptor.CompressedSize, SEEK_CUR);
         }
     }
-	char op[64];
+	char op[64] = { 0 };
 	char *op_slash = strrchr(outputpath, '/');
 	int len = op_slash - outputpath;
 	strncpy(op, outputpath, len);
@@ -155,7 +154,6 @@ int zipFileExtract(char *archivepath, int archiveoffs, char *filename, char *out
     SceUID out_fd = sceIoOpen(outputpath, PSP_O_WRONLY | PSP_O_CREAT | PSP_O_TRUNC, 0777);
     if (out_fd < 0) {
 		ErrorReturn("could not open outputpath %s", outputpath);
-        //printf("Could not open output file %s\n", outputpath);
         sceIoClose(fd);
         return -1;
     }
@@ -173,7 +171,6 @@ int zipFileExtract(char *archivepath, int archiveoffs, char *filename, char *out
         cbuffer = malloc(buf_size);
         if (cbuffer == NULL) {
 			ErrorReturn("Failed to alloc memory");
-            //printf("Failed to allocate memory for buffer!\n");
             sceIoClose(fd);
             sceIoClose(out_fd);
             return -1;
@@ -194,74 +191,97 @@ int zipFileExtract(char *archivepath, int archiveoffs, char *filename, char *out
             sceIoClose(out_fd);
             return -1;
         }
+	while (readbytes < data.DataDescriptor.CompressedSize) {
+		if (stream.avail_in == 0) {
+			int bytes_to_read = buf_size;
+			if (data.DataDescriptor.CompressedSize - readbytes < buf_size) {
+				bytes_to_read = data.DataDescriptor.CompressedSize - readbytes;
+			}
+			stream.avail_in = sceIoRead(fd, cbuffer, bytes_to_read);
+			stream.next_in = cbuffer;
+			readbytes += stream.avail_in;
+		}
 
-        while (readbytes < data.DataDescriptor.CompressedSize) {
-            if (stream.avail_in == 0) {
-                int bytes_to_read = buf_size;
-                if (data.DataDescriptor.CompressedSize - readbytes < buf_size) {
-                    bytes_to_read = data.DataDescriptor.CompressedSize - readbytes;
-                }
-                stream.avail_in = sceIoRead(fd, cbuffer, bytes_to_read);
-                stream.next_in = cbuffer;
-                readbytes += stream.avail_in;
-            }
+		err = inflate(&stream, Z_NO_FLUSH);
+		if (err == Z_STREAM_END) {
+			// Write remaining decompressed data
+			int bytes_decompressed = buf_size - stream.avail_out;
+			if (bytes_decompressed > 0) {
+				sceIoWrite(out_fd, outbuf, bytes_decompressed);
+			}
+			break; // Finished decompression
+		} else if (err != Z_OK && err != Z_BUF_ERROR) {
+			ErrorReturn("Inflation Error");
+			inflateEnd(&stream);
+			free(cbuffer);
+			sceIoClose(fd);
+			sceIoClose(out_fd);
+			return -1;
+		}
 
-            err = inflate(&stream, Z_NO_FLUSH);
-            if (err == Z_STREAM_END) {
-                // Write any remaining decompressed data
-                sceIoWrite(out_fd, outbuf, buf_size - stream.avail_out);
-                break; // Finished decompression
-            } else if (err != Z_OK && err != Z_BUF_ERROR) {
-				ErrorReturn("Inflation Error");
-                //printf("Inflation error: %d\n", err);
-                inflateEnd(&stream);
-                free(cbuffer);
-                sceIoClose(fd);
-                sceIoClose(out_fd);
-                return -1;
-            }
+		if (stream.avail_out == 0) {
+			// Output buffer is full, write only the amount of valid data
+			int bytes_decompressed = buf_size;
+			sceIoWrite(out_fd, outbuf, bytes_decompressed);
+			stream.next_out = outbuf;  // Reset output pointer
+			stream.avail_out = buf_size;  // Reset available space in output buffer
+		}
+	}
 
-            if (stream.avail_out == 0) {
-                // Output buffer is full, write it to the output file
-                sceIoWrite(out_fd, outbuf, buf_size);
-                stream.next_out = outbuf;  // Reset output pointer
-                stream.avail_out = buf_size;  // Reset available space in output buffer
-            }
-        }
+	// Handle any remaining decompressed data if inflate did not end at Z_STREAM_END
+	int bytes_decompressed = buf_size - stream.avail_out;
+	if (bytes_decompressed > 0) {
+    	sceIoWrite(out_fd, outbuf, bytes_decompressed);
+	}
 
-        inflateEnd(&stream);
-        free(cbuffer);
-    }
+	inflateEnd(&stream);
+	free(cbuffer);
+	sceIoClose(fd);
+	sceIoClose(out_fd);
+	
 
-    sceIoClose(fd);
-    sceIoClose(out_fd);
-    return data.DataDescriptor.UncompressedSize;
+
+      	return data.DataDescriptor.UncompressedSize;
+	}
 }
 
+char *ark_cipl_files[] = {
+	"EBOOT.PBP",
+	"ipl_update.prx",
+	"kbooti_update.prx",
+	"kpspident.prx"
+};
+
+
+// BINS are headers due to dataloss
+char *ark_01234_file[] = {
+	"FLASH0.ARK",
+	"ICON0.PNG",
+	"IDSREG.PRX",
+	"LANG.ARK",
+	"MEDIASYN.PRX",
+	"PARAM.SFO",
+	"POPSMAN.PRX",
+	"POPS.PRX",
+	"PS1SPU.PRX",
+	"RECOVERY.PRX",
+	"SETTINGS.TXT",
+	"THEME.ARK",
+	"UPDATER.TXT",
+	"USBDEV.PRX",
+	"VBOOT.PBP",
+	"VSHMENU.PRX",
+	"XBOOT.PBP",
+	"XMBCTRL.PRX",
+};
+
 char *pkg_list[] = {
-			"PSP Tool 1.69",
-			"UMDRescue",
-			"UMDRescue (1.50 kxploit)",
-			"Wallpaper Dumper",
-			"Theme Dumper",
-			"ChronoSwitch",
-			"YABT",
+			"ARK-4 Extractor",
 			"6.61 OFW",
+			"ChronoSwitch",
 };
 
-char *desc[] = {
-		"Originally created by raing3, PSP Tool 1.69 is and updated version\nsupporting later version of DC with other helpful additions.\n",
-		"Orginally built with spiritfader, This version of UMDRescue will work\non other CFW's but will only dump GAMES due to kernel limitations.\n",
-		"This version of UMDRescue will work\non other 1.50 (OFW) and 1.50 Kernel Add-on CFW's.\nThis is used to dump a 1:1 copy of the UMD Disc.\n",
-		"Wallpaper Dumper was initally created due to someone on reddit loosing there relative.\nI created this because the phone on their PSP to preserve the image for them.\n",
-		"Theme Dumper is pretty much a 1:1 replica of Wallpaper Dumper,\nbut used to dump OFW themes (PTF).\nThough this can be used to dump CTF's as well.\n",
-		"Chronoswitch originally created by Davee, then forked and updated by The Zett.\nI forked and updated to add support for GO to check for the update\nvia ef0/ms0 as well all checking for any EBOOT.PBP at all in /GAME/UPDATE",
-		"YABT ( Yet Another Button Tester ), I made just for fun to see what I could make. Was more like a Hello World for all the user buttons.",
-		"OFW (Official Firmware), 6.61 for both Standard PSP and PSP GO. Will prompt to extract to ms0:/PSP/GAME/UPDATE and also the root fileystem (i.e ms0:/661.PBP)",
-};
-
-int menu_size = (sizeof(pkg_list)/sizeof(pkg_list[0]))-1;
-int desc_size = (sizeof(desc)/sizeof(desc[0]))-1;
+int menu_size = (sizeof(pkg_list)/sizeof(pkg_list[0]));
 
 
 /*
@@ -373,26 +393,16 @@ void LoadWave()
 }
 
 
-void OnMainMenuSelectDesc() {
-	int sel = vlfGuiCentralMenuSelection();
-	vlfGuiRemoveText(triangle);
-	vlfGuiRemoveText(lt);
-	ResetScreen(0, 0, 0);
-	if (waiticon == NULL) {
-		ErrorReturn(desc[sel]);
-		mode = "Main";
-		ResetScreen(1, 0, sel);
-		return;
-	}
-}
+//static char outname[64] = { 0 };
+//static char filetodump[64] = { 0 };
 
-
+char out[64] = { 0 };
+char fn[64] = { 0 };
 void OnMainMenuSelect(int sel) {
-		selitem = sel;
 		if(mode == "Main") {
 				if(sel == 0) {
-					mode = "PSP Tool";
-					int cont = vlfGuiMessageDialog("Do you want to install PSP Tool?", VLF_MD_TYPE_NORMAL|VLF_MD_BUTTONS_YESNO|VLF_MD_INITIAL_CURSOR_NO);
+					mode = "ARK-4 Setup Files";
+					int cont = vlfGuiMessageDialog("Do you want to extract ARK-4 setup files?\nThis will Extract the following: ARK_Loader, ARK_01234, ARK_Full_Installer, ARK_cIPL", VLF_MD_TYPE_NORMAL|VLF_MD_BUTTONS_YESNO|VLF_MD_INITIAL_CURSOR_NO);
 					if(cont != 1) {
 						mode = "Main";
 						ResetScreen(1, 0, sel);
@@ -400,13 +410,75 @@ void OnMainMenuSelect(int sel) {
 					}
 					else {
 						memset(big_buf, 0, sizeof(big_buf));
-						char outname[128];
-						char filetodump[] = "psptool/EBOOT.PBP";
-						sprintf(outname, "ms0:/PSP/GAME/PSP_Tool/EBOOT.PBP");
 						ResetScreen(0, 0, 0);
 						extract = vlfGuiAddText(120, 120, "Extracting... Please Wait...");
 						vlfGuiDrawFrame();
+						// ARK_cIPL
+						char *outname = malloc(64);
+						char *filetodump = malloc(64);
+						for(int i=0;i<sizeof(ark_cipl_files)/sizeof(ark_cipl_files[0]);i++) {
+							memset(filetodump, '\0', sizeof(filetodump));
+							memset(outname, '\0', sizeof(outname));
+							sprintf(filetodump, "ARK_cIPL/%s", ark_cipl_files[i]);
+							sprintf(outname, "ms0:/PSP/GAME/ARK_cIPL/%s", ark_cipl_files[i]);
+							zipFileExtract(path, EBOOT_PSAR, filetodump, outname);
+						}
+
+						// ARK_Loader
+						memset(filetodump, '\0', sizeof(filetodump));
+						memset(outname, '\0', sizeof(outname));
+						strcpy(filetodump, "ARK_Loader/EBOOT.PBP");
+						strcpy(outname, "ms0:/PSP/GAME/ARK_Loader/EBOOT.PBP");
 						zipFileExtract(path, EBOOT_PSAR, filetodump, outname);
+						memset(filetodump, '\0', sizeof(filetodump));
+						memset(outname, '\0', sizeof(outname));
+						strcpy(filetodump, "ARK_Loader/K.BIN");
+						strcpy(outname, "ms0:/PSP/GAME/ARK_Loader/K.BIN");
+						zipFileExtract(path, EBOOT_PSAR, filetodump, outname);
+
+						// ARK_01234
+						for(int j=0;j<sizeof(ark_01234_file)/sizeof(ark_01234_file[0]);j++) {
+							memset(filetodump, '\0', sizeof(filetodump));
+							memset(outname, '\0', sizeof(outname));
+							sprintf(filetodump, "ARK_01234/%s", ark_01234_file[j]);
+							sprintf(outname, "ms0:/PSP/SAVEDATA/ARK_01234/%s", ark_01234_file[j]);
+							zipFileExtract(path, EBOOT_PSAR, filetodump, outname);
+						}
+
+						
+						int fd;
+						fd = sceIoOpen("ms0:/PSP/SAVEDATA/ARK_01234/K.BIN", PSP_O_WRONLY | PSP_O_CREAT | PSP_O_TRUNC, 0777);
+						sceIoWrite(fd, K_header, size_K_header);
+						sceIoClose(fd);
+						fd = sceIoOpen("ms0:/PSP/SAVEDATA/ARK_01234/H.BIN", PSP_O_WRONLY | PSP_O_CREAT | PSP_O_TRUNC, 0777);
+						sceIoWrite(fd, H_header, size_H_header);
+						sceIoClose(fd);
+						fd = sceIoOpen("ms0:/PSP/SAVEDATA/ARK_01234/ARK.BIN", PSP_O_WRONLY | PSP_O_CREAT | PSP_O_TRUNC, 0777);
+						sceIoWrite(fd, ARK_header, size_ARK_header);
+						sceIoClose(fd);
+						fd = sceIoOpen("ms0:/PSP/SAVEDATA/ARK_01234/ARK4.BIN", PSP_O_WRONLY | PSP_O_CREAT | PSP_O_TRUNC, 0777);
+						sceIoWrite(fd, ARK4_header, size_ARK4_header);
+						sceIoClose(fd);
+						fd = sceIoOpen("ms0:/PSP/SAVEDATA/ARK_01234/ARKX.BIN", PSP_O_WRONLY | PSP_O_CREAT | PSP_O_TRUNC, 0777);
+						sceIoWrite(fd, ARKX_header, size_ARKX_header);
+						sceIoClose(fd);
+						fd = sceIoOpen("ms0:/PSP/SAVEDATA/ARK_01234/SAVEDATA.BIN", PSP_O_WRONLY | PSP_O_CREAT | PSP_O_TRUNC, 0777);
+						sceIoWrite(fd, SAVEDATA_header, size_SAVEDATA_header);
+						sceIoClose(fd);
+
+						// ARK_Full_Installer
+						memset(filetodump, '\0', sizeof(filetodump));
+						memset(outname, '\0', sizeof(outname));
+						strcpy(filetodump, "ARK_Full_Installer/EBOOT.PBP");
+						strcpy(outname, "ms0:/PSP/GAME/ARK_Full_Installer/EBOOT.PBP");
+						zipFileExtract(path, EBOOT_PSAR, filetodump, outname);
+
+
+						free(filetodump);
+						free(outname);
+
+
+						// Extracted
 						vlfGuiRemoveText(extract);
 						ErrorReturn("%s successfully installed.", mode);
 						mode = "Main";
@@ -415,137 +487,6 @@ void OnMainMenuSelect(int sel) {
 					}
 				}
 				else if(sel == 1) {
-					mode = "UMDRescue";
-					int cont = vlfGuiMessageDialog("Do you want to install UMDRescue?", VLF_MD_TYPE_NORMAL|VLF_MD_BUTTONS_YESNO|VLF_MD_INITIAL_CURSOR_NO);
-					if(cont != 1) {
-						mode = "Main";
-						ResetScreen(1, 0, sel);
-						return;
-					}
-					else {
-						memset(big_buf, 0, sizeof(big_buf));
-						char outname[128];
-						char filetodump[] = "UMDRescue/GAME/EBOOT.PBP";
-						sprintf(outname, "ms0:/PSP/GAME/UMDRescue/EBOOT.PBP");
-						zipFileExtract(path, EBOOT_PSAR, filetodump, outname);
-						ErrorReturn("%s successfully installed.", mode);
-						mode = "Main";
-						ResetScreen(1, 0, sel);
-						return;
-					}
-				}
-				else if(sel == 2) {
-					mode = "UMDRescue ( 1.50 kxploit )";
-					int cont = vlfGuiMessageDialog("Do you want to install UMDRescue? (1.50 kxploit)", VLF_MD_TYPE_NORMAL|VLF_MD_BUTTONS_YESNO|VLF_MD_INITIAL_CURSOR_NO);
-					if(cont != 1) {
-						mode = "Main";
-						ResetScreen(1, 0, sel);
-						return;
-					}
-					else {
-						// Part 1
-						memset(big_buf, 0, sizeof(big_buf));
-						char outname[128];
-						char filetodump[] = "UMDRescue/GAME150/%__SCE__UMDRescue/EBOOT.PBP";
-						char mkdir_file[] = "ms0:/PSP/GAME/%__SCE__UMDRescue";
-						sceIoMkdir(mkdir_file, 0777);
-						sprintf(outname, "ms0:/PSP/GAME/%%__SCE__UMDRescue/EBOOT.PBP");
-						strcat(mkdir_file, "/EBOOT.PBP");
-						zipFileExtract(path, EBOOT_PSAR, filetodump, mkdir_file);
-
-						// Part 2
-						char outname2[64];
-						char filetodump2[] ="UMDRescue/GAME150/__SCE__UMDRescue/EBOOT.PBP";
-						snprintf(outname2, 41,"ms0:/PSP/GAME/__SCE__UMDRescue/EBOOT.PBP");
-						zipFileExtract(path, EBOOT_PSAR, filetodump2, outname2);
-
-						ErrorReturn("%s successfully installed.", mode);
-						mode = "Main";
-						ResetScreen(1, 0, sel);
-						return;
-					}
-				}
-				else if(sel == 3) {
-					mode = "Wallpaper Dumper";
-					int cont = vlfGuiMessageDialog("Do you want to install Wallpaper Dumper?", VLF_MD_TYPE_NORMAL|VLF_MD_BUTTONS_YESNO|VLF_MD_INITIAL_CURSOR_NO);
-					if(cont != 1) {
-						mode = "Main";
-						ResetScreen(1, 0, sel);
-						return;
-					}
-					else {
-						memset(big_buf, 0, sizeof(big_buf));
-						char outname[128];
-						char filetodump[] = "wallpaper_dumper/EBOOT.PBP";
-						sprintf(outname, "ms0:/PSP/GAME/wallpaper_dumper/EBOOT.PBP");
-						zipFileExtract(path, EBOOT_PSAR, filetodump, outname);
-						ErrorReturn("%s successfully installed.", mode);
-						mode = "Main";
-						ResetScreen(1, 0, sel);
-						return;
-					}
-				}
-				else if(sel == 4) {
-					mode = "Theme Dumper";
-					int cont = vlfGuiMessageDialog("Do you want to install Wallpaper Dumper?", VLF_MD_TYPE_NORMAL|VLF_MD_BUTTONS_YESNO|VLF_MD_INITIAL_CURSOR_NO);
-					if(cont != 1) {
-						mode = "Main";
-						ResetScreen(1, 0, sel);
-						return;
-					}
-					else {
-						memset(big_buf, 0, sizeof(big_buf));
-						char outname[128];
-						char filetodump[] = "theme_dumper/EBOOT.PBP";
-						sprintf(outname, "ms0:/PSP/GAME/theme_dumper/EBOOT.PBP");
-						zipFileExtract(path, EBOOT_PSAR, filetodump, outname);
-						ErrorReturn("%s successfully installed.", mode);
-						mode = "Main";
-						ResetScreen(1, 0, sel);
-						return;
-					}
-				}
-				else if(sel == 5) {
-					mode = "ChronoSwitch";
-					int cont = vlfGuiMessageDialog("Do you want to install ChronoSwitch?", VLF_MD_TYPE_NORMAL|VLF_MD_BUTTONS_YESNO|VLF_MD_INITIAL_CURSOR_NO);
-					if(cont != 1) {
-						mode = "Main";
-						ResetScreen(1, 0, sel);
-						return;
-					}
-					else {
-						memset(big_buf, 0, sizeof(big_buf));
-						char outname[128];
-						char filetodump[] = "chronoswitch/EBOOT.PBP";
-						sprintf(outname, "ms0:/PSP/GAME/ChronoSwitch/EBOOT.PBP");
-						zipFileExtract(path, EBOOT_PSAR, filetodump, outname);
-						ErrorReturn("%s successfully installed.", mode);
-						mode = "Main";
-						ResetScreen(1, 0, sel);
-						return;
-					}
-				}
-				else if(sel == 6) {
-					mode = "YABT";
-					int cont = vlfGuiMessageDialog("Do you want to install YABT?", VLF_MD_TYPE_NORMAL|VLF_MD_BUTTONS_YESNO|VLF_MD_INITIAL_CURSOR_NO);
-					if(cont != 1) {
-						mode = "Main";
-						ResetScreen(1, 0, sel);
-						return;
-					}
-					else {
-						memset(big_buf, 0, sizeof(big_buf));
-						char outname[128];
-						char filetodump[] = "YABT/EBOOT.PBP";
-						sprintf(outname, "ms0:/PSP/GAME/YABT/EBOOT.PBP");
-						zipFileExtract(path, EBOOT_PSAR, filetodump, outname);
-						ErrorReturn("%s successfully installed.", mode);
-						mode = "Main";
-						ResetScreen(1, 0, sel);
-						return;
-					}
-				}
-				else if(sel == 7) {
 					mode = "OFW";
 					int model = kuKernelGetModel();
 					int cont = -1;
@@ -554,30 +495,20 @@ void OnMainMenuSelect(int sel) {
 						if(cont == 1) {
 							ResetScreen(0, 0, 0);
 							extract = vlfGuiAddText(120, 120, "Extracting... Please Wait...");
-							vlfGuiDrawFrame();
+							char *outname = malloc(64);
+							char *filetodump = malloc(64);
 							memset(big_buf, 0, sizeof(big_buf));
-							char outname[128];
-							char filetodump[] = "OFW/GO/EBOOT.PBP";
-							sprintf(outname, "ms0:/PSP/GAME/UPDATE/EBOOT.PBP");
-							zipFileExtract(path, EBOOT_PSAR, filetodump, outname);
-						    vlfGuiRemoveText(extract);
-							ErrorReturn("%s successfully installed.", mode);
-							vlfGuiRemoveText(extract);
-						}
-						cont = -1;
-
-						cont = vlfGuiMessageDialog("Do you want to extract 6.61GO.PBP OFW to to root of the Memory Stick?", VLF_MD_TYPE_NORMAL|VLF_MD_BUTTONS_YESNO|VLF_MD_INITIAL_CURSOR_NO);
-						if(cont == 1) {
-							memset(big_buf, 0, sizeof(big_buf));
-							char outname[128];
-							char filetodump[] = "OFW/GO/EBOOT.PBP";
-							sprintf(outname, "ms0:/661GO.PBP");
+							memset(filetodump, 0, sizeof(filetodump));
+							memset(outname, 0, sizeof(outname));
 							ResetScreen(0, 0, 0);
-							extract = vlfGuiAddText(120, 120, "Extracting... Please Wait...");
 							vlfGuiDrawFrame();
+							strcpy(filetodump, "OFW/GO/GO661.PBP");
+							strcpy(outname, "ms0:/PSP/GAME/UPDATE/EBOOT.PBP");
 							zipFileExtract(path, EBOOT_PSAR, filetodump, outname);
 						    vlfGuiRemoveText(extract);
 							ErrorReturn("%s successfully installed.", mode);
+							free(filetodump);
+							free(outname);
 							mode = "Main";
 							ResetScreen(1, 0, sel);
 							return;
@@ -591,25 +522,13 @@ void OnMainMenuSelect(int sel) {
 					else {
 						cont = vlfGuiMessageDialog("Do you want to extract 6.61 OFW to PSP/GAME/UPDATE/ ?", VLF_MD_TYPE_NORMAL|VLF_MD_BUTTONS_YESNO|VLF_MD_INITIAL_CURSOR_NO);
 						if(cont == 1) {
+							char *outname = malloc(64);
+							char *filetodump = malloc(64);
 							memset(big_buf, 0, sizeof(big_buf));
-							char outname[128];
-							char filetodump[] = "OFW/X000/EBOOT.PBP";
-							sprintf(outname, "ms0:/PSP/GAME/UPDATE/EBOOT.PBP");
-							ResetScreen(0, 0, 0);
-							extract = vlfGuiAddText(120, 120, "Extracting... Please Wait...");
-							vlfGuiDrawFrame();
-							zipFileExtract(path, EBOOT_PSAR, filetodump, outname);
-						    vlfGuiRemoveText(extract);
-							ErrorReturn("%s successfully installed.", mode);
-						}
-
-						cont = -1;
-						cont = vlfGuiMessageDialog("Do you want to extract 6.61.PBP OFW to to root of the Memory Stick?", VLF_MD_TYPE_NORMAL|VLF_MD_BUTTONS_YESNO|VLF_MD_INITIAL_CURSOR_NO);
-						if(cont == 1) {
-							memset(big_buf, 0, sizeof(big_buf));
-							char outname[128];
-							char filetodump[] = "OFW/X000/EBOOT.PBP";
-							sprintf(outname, "ms0:/661.PBP");
+							memset(filetodump, '\0', sizeof(filetodump));
+							memset(outname, '\0', sizeof(outname));
+							strcpy(filetodump, "OFW/X000/EBOOT.PBP");
+							strcpy(outname, "ms0:/PSP/GAME/UPDATE/EBOOT.PBP");
 							ResetScreen(0, 0, 0);
 							extract = vlfGuiAddText(120, 120, "Extracting... Please Wait...");
 							vlfGuiDrawFrame();
@@ -617,6 +536,8 @@ void OnMainMenuSelect(int sel) {
 						    vlfGuiRemoveText(extract);
 							ErrorReturn("%s successfully installed.", mode);
 							mode = "Main";
+							free(filetodump);
+							free(outname);
 							ResetScreen(1, 0, sel);
 							return;
 						}
@@ -626,28 +547,48 @@ void OnMainMenuSelect(int sel) {
 							return;
 						}
 
-
-
-
 					}
-					
 				}
-		}
+					else if(sel == 2) {
+						mode = "ChronoSwitch";
+						int cont = vlfGuiMessageDialog("Do you want to install ChronoSwitch?", VLF_MD_TYPE_NORMAL|VLF_MD_BUTTONS_YESNO|VLF_MD_INITIAL_CURSOR_NO);
+						if(cont != 1) {
+							mode = "Main";
+							ResetScreen(1, 0, sel);
+							return;
+						}
+						else {
+							char *outname = malloc(64);
+							char *filetodump = malloc(64);
+							memset(big_buf, 0, sizeof(big_buf));
+							memset(filetodump, 0, sizeof(filetodump));
+							memset(outname, 0, sizeof(outname));
+							strcpy(filetodump, "chronoswitch/EBOOT.PBP");
+							strcpy(outname, "ms0:/PSP/GAME/ChronoSwitch/EBOOT.PBP");
+							zipFileExtract(path, EBOOT_PSAR, filetodump, outname);
+							ErrorReturn("%s successfully installed.", mode);
+							mode = "Main";
+							free(filetodump);
+							free(outname);
+							ResetScreen(1, 0, sel);
+							return;
+						}
+					
+					}
+				}
 
     if(waiticon != NULL){waiticon = vlfGuiRemoveShadowedPicture(waiticon);}
 
 	return;
+
 
 }
 
 void MainMenu(int sel) {
 
 	if(mode == "Main") {
-		vlfGuiCentralMenu(menu_size+1, pkg_list, sel, OnMainMenuSelect, 0, 0);
+		vlfGuiCentralMenu(menu_size, pkg_list, sel, OnMainMenuSelect, 0, 0);
 
-		vlfGuiChangeCharacterByButton('-', VLF_TRIANGLE);
-    	triangle = vlfGuiAddText(20, 250, "- for Description");
-    	lt = vlfGuiAddText(310, 250, "LT change bg color");
 
 	}
 
@@ -657,21 +598,20 @@ void MainMenu(int sel) {
 }
 void ResetScreen(int showmenu, int showback, int sel)
 {
-    int i;
+    //int i;
 
-    for(i = 0; i < vlf_text_items; i++){if(vlf_texts[i] != NULL){vlf_texts[i] = vlfGuiRemoveText(vlf_texts[i]);}}
-    if(vlf_picture != NULL){vlf_picture = vlfGuiRemovePicture(vlf_picture);}
-    if(vlf_progressbar != NULL){vlf_progressbar = vlfGuiRemoveProgressBar(vlf_progressbar);}
+    //for(i = 0; i < vlf_text_items; i++){if(vlf_texts[i] != NULL){vlf_texts[i] = vlfGuiRemoveText(vlf_texts[i]);}}
+    //if(vlf_picture != NULL){vlf_picture = vlfGuiRemovePicture(vlf_picture);}
+    //if(vlf_progressbar != NULL){vlf_progressbar = vlfGuiRemoveProgressBar(vlf_progressbar);}
     vlfGuiCancelCentralMenu();
-    if((vlfGuiGetButtonConfig() && showback_prev) || (!vlfGuiGetButtonConfig() && showenter_prev)){vlfGuiCancelBottomDialog();showback_prev = 0;showenter_prev = 0;} 
+    //if((vlfGuiGetButtonConfig() && showback_prev) || (!vlfGuiGetButtonConfig() && showenter_prev)){vlfGuiCancelBottomDialog();showback_prev = 0;showenter_prev = 0;} 
     
-	selitem = sel;
     if(showmenu==1){MainMenu(sel);}
 }
 
 void setup() {
 	time_t start = time(NULL);
-	while(time(NULL) - start < 4) {
+	while(time(NULL) - start < 3) {
 		vlfGuiDrawFrame();
 	}
 }
@@ -694,14 +634,13 @@ int app_main(int argc, char *args[]) {
     
     LoadWave();
     SetBackground();
-    vlfGuiAddEventHandler(PSP_CTRL_LTRIGGER, 0, SetBackground, NULL);
-    vlfGuiAddEventHandler(PSP_CTRL_TRIANGLE, 0, OnMainMenuSelectDesc, NULL);
-
+	vlfGuiAddEventHandler(PSP_CTRL_LTRIGGER, 0, SetBackground, NULL);
 	ResetScreen(0, 0, 0);
-    quote = vlfGuiAddText(120, 120, "I've got all your PSP needz...");
+    quote = vlfGuiAddText(120, 120, "I've got all your ARK-4 needz...");
 	setup();
 	vlfGuiRemoveText(quote);
 	
+    lt = vlfGuiAddText(310, 250, "LT change bg color");
 
 	//int btn = GetKeyPress(0);
 	ResetScreen(1, 0, 0);
