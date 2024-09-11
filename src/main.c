@@ -109,7 +109,7 @@ int WriteFile(char *file, int seek, char *buf, int size)
 	return written;
 }
 
-#define CHUNK_SIZE 512  // 8KB buffer size
+#define CHUNK_SIZE 512  // 512B buffer size
 
 int zipFileExtract(char *archivepath, int archiveoffs, char *filename, char *outputpath) {
     struct SZIPFileHeader data;

@@ -8,7 +8,7 @@ PSP_EBOOT_PSAR = data.zip
 
 PSP_EBOOT_TITLE = ARK-4 Toolkit
 
-#PSP_EBOOT_ICON = ../res/ICON0.PNG
+PSP_EBOOT_ICON = ../res/ICON0.PNG
 
 #PSP_EBOOT_PIC1 = ../res/PIC1.PNG
 
