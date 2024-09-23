@@ -5,6 +5,8 @@
 #include <zlib.h>
 #include <stdarg.h>
 #include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 #include <unistd.h>
 #include <time.h>
 
@@ -17,9 +19,6 @@
 PSP_MODULE_INFO("ARK-4 Toolkit", 0, 1, 0);
 PSP_MAIN_THREAD_ATTR(0);
 
-//VlfText vlf_texts[vlf_text_items];
-//VlfPicture vlf_picture = NULL;
-//VlfProgressBar vlf_progressbar = NULL;
 int showback_prev = 0;
 int showenter_prev = 0;
 
@@ -109,11 +108,13 @@ int WriteFile(char *file, int seek, char *buf, int size)
 	return written;
 }
 
-#define CHUNK_SIZE 512  // 512B buffer size
 
 int zipFileExtract(char *archivepath, int archiveoffs, char *filename, char *outputpath) {
     struct SZIPFileHeader data;
-    char foundfilename[1024];
+	int CHUNK_SIZE = 512;
+	//if(strstr(outputpath, "UPDATE"))
+		//CHUNK_SIZE = 16384;  // 512B buffer size
+    char foundfilename[CHUNK_SIZE];
     u8 *cbuffer;
     u8 outbuf[CHUNK_SIZE];  // Output buffer for decompressed data
     int buf_size = CHUNK_SIZE;
@@ -121,7 +122,6 @@ int zipFileExtract(char *archivepath, int archiveoffs, char *filename, char *out
     SceUID fd = sceIoOpen(archivepath, PSP_O_RDONLY, 0);
     if (fd < 0) {
 		ErrorReturn("could not open %s", archivepath);
-        //printf("Could not open %s\n", archivepath);
         return -1;
     }
     sceIoLseek(fd, archiveoffs, SEEK_SET);
@@ -135,7 +135,7 @@ int zipFileExtract(char *archivepath, int archiveoffs, char *filename, char *out
         }
 
         sceIoRead(fd, foundfilename, data.FilenameLength);
-        foundfilename[data.FilenameLength] = 0;
+        foundfilename[data.FilenameLength] = '\0';
         if (data.ExtraFieldLength) {
             sceIoLseek(fd, data.ExtraFieldLength, SEEK_CUR);
         }
@@ -150,7 +150,11 @@ int zipFileExtract(char *archivepath, int archiveoffs, char *filename, char *out
 	char *op_slash = strrchr(outputpath, '/');
 	int len = op_slash - outputpath;
 	strncpy(op, outputpath, len);
-	sceIoMkdir(op, 0777);
+	SceUID verify = sceIoDopen(op);
+	if(verify >= 0)
+		sceIoDclose(verify);
+	else
+		sceIoMkdir(op, 0777);
     SceUID out_fd = sceIoOpen(outputpath, PSP_O_WRONLY | PSP_O_CREAT | PSP_O_TRUNC, 0777);
     if (out_fd < 0) {
 		ErrorReturn("could not open outputpath %s", outputpath);
@@ -191,6 +195,7 @@ int zipFileExtract(char *archivepath, int archiveoffs, char *filename, char *out
             sceIoClose(out_fd);
             return -1;
         }
+		//ErrorReturn("Compressed: %lu\nUncompressed: %lu", data.DataDescriptor.CompressedSize, data.DataDescriptor.UncompressedSize);
 	while (readbytes < data.DataDescriptor.CompressedSize) {
 		if (stream.avail_in == 0) {
 			int bytes_to_read = buf_size;
@@ -203,13 +208,14 @@ int zipFileExtract(char *archivepath, int archiveoffs, char *filename, char *out
 		}
 
 		err = inflate(&stream, Z_NO_FLUSH);
+		//err = inflate(&stream, Z_SYNC_FLUSH);
+		//if (err == Z_STREAM_END || err == Z_OK) {
 		if (err == Z_STREAM_END) {
 			// Write remaining decompressed data
 			int bytes_decompressed = buf_size - stream.avail_out;
 			if (bytes_decompressed > 0) {
 				sceIoWrite(out_fd, outbuf, bytes_decompressed);
 			}
-			break; // Finished decompression
 		} else if (err != Z_OK && err != Z_BUF_ERROR) {
 			ErrorReturn("Inflation Error");
 			inflateEnd(&stream);
@@ -221,31 +227,29 @@ int zipFileExtract(char *archivepath, int archiveoffs, char *filename, char *out
 
 		if (stream.avail_out == 0) {
 			// Output buffer is full, write only the amount of valid data
-			int bytes_decompressed = buf_size;
-			sceIoWrite(out_fd, outbuf, bytes_decompressed);
+			sceIoWrite(out_fd, outbuf, buf_size);
 			stream.next_out = outbuf;  // Reset output pointer
 			stream.avail_out = buf_size;  // Reset available space in output buffer
 		}
 	}
 
 	// Handle any remaining decompressed data if inflate did not end at Z_STREAM_END
-	int bytes_decompressed = buf_size - stream.avail_out;
+	/*int bytes_decompressed = buf_size - stream.avail_out;
 	if (bytes_decompressed > 0) {
     	sceIoWrite(out_fd, outbuf, bytes_decompressed);
 	}
+	*/
+	
 
 	inflateEnd(&stream);
 	free(cbuffer);
 	sceIoClose(fd);
 	sceIoClose(out_fd);
-	
-
-
-      	return data.DataDescriptor.UncompressedSize;
+    return data.DataDescriptor.UncompressedSize;
 	}
 }
 
-char *ark_cipl_files[] = {
+char *ark_cipl_files_list[] = {
 	"EBOOT.PBP",
 	"ipl_update.prx",
 	"kbooti_update.prx",
@@ -254,31 +258,44 @@ char *ark_cipl_files[] = {
 
 
 // BINS are headers due to dataloss
-char *ark_01234_file[] = {
-	"FLASH0.ARK",
-	"ICON0.PNG",
-	"IDSREG.PRX",
-	"LANG.ARK",
-	"MEDIASYN.PRX",
-	"PARAM.SFO",
-	"POPSMAN.PRX",
-	"POPS.PRX",
-	"PS1SPU.PRX",
-	"RECOVERY.PRX",
-	"SETTINGS.TXT",
-	"THEME.ARK",
-	"UPDATER.TXT",
-	"USBDEV.PRX",
-	"VBOOT.PBP",
-	"VSHMENU.PRX",
-	"XBOOT.PBP",
-	"XMBCTRL.PRX",
+const char *ark_01234_file[] = {
+	"ms0:/PSP/SAVEDATA/ARK_01234/ARK4.BIN",
+    "ms0:/PSP/SAVEDATA/ARK_01234/ARK.BIN",
+    "ms0:/PSP/SAVEDATA/ARK_01234/ARKX.BIN",
+    "ms0:/PSP/SAVEDATA/ARK_01234/FLASH0.ARK",
+    "ms0:/PSP/SAVEDATA/ARK_01234/H.BIN",
+    "ms0:/PSP/SAVEDATA/ARK_01234/ICON0.PNG",
+    "ms0:/PSP/SAVEDATA/ARK_01234/IDSREG.PRX",
+    "ms0:/PSP/SAVEDATA/ARK_01234/K.BIN",
+    "ms0:/PSP/SAVEDATA/ARK_01234/LANG.ARK",
+    "ms0:/PSP/SAVEDATA/ARK_01234/MEDIASYN.PRX",
+    "ms0:/PSP/SAVEDATA/ARK_01234/PARAM.SFO",
+    "ms0:/PSP/SAVEDATA/ARK_01234/POPSMAN.PRX",
+    "ms0:/PSP/SAVEDATA/ARK_01234/POPS.PRX",
+    "ms0:/PSP/SAVEDATA/ARK_01234/PS1SPU.PRX",
+    "ms0:/PSP/SAVEDATA/ARK_01234/RECOVERY.PRX",
+    "ms0:/PSP/SAVEDATA/ARK_01234/SAVEDATA.BIN",
+    "ms0:/PSP/SAVEDATA/ARK_01234/SETTINGS.TXT",
+    "ms0:/PSP/SAVEDATA/ARK_01234/THEME.ARK",
+    "ms0:/PSP/SAVEDATA/ARK_01234/UPDATER.TXT",
+    "ms0:/PSP/SAVEDATA/ARK_01234/USBDEV.PRX",
+    "ms0:/PSP/SAVEDATA/ARK_01234/VBOOT.PBP",
+    "ms0:/PSP/SAVEDATA/ARK_01234/VSHMENU.PRX",
+    "ms0:/PSP/SAVEDATA/ARK_01234/XBOOT.PBP",
+    "ms0:/PSP/SAVEDATA/ARK_01234/XMBCTRL.PRX",
 };
 
+typedef struct {
+	const char *filename;
+	unsigned char *data;
+	unsigned int size;
+} ARK4_Struct;
+
+
 char *pkg_list[] = {
-			"ARK-4 Extractor",
-			"6.61 OFW",
-			"ChronoSwitch",
+	"ARK-4 Extractor",
+	"6.61 OFW",
+	"ChronoSwitch",
 };
 
 int menu_size = (sizeof(pkg_list)/sizeof(pkg_list[0]));
@@ -303,9 +320,10 @@ int CallbackThread(SceSize args, void *argp)
     return 0;
 }
 
+
+static int thid = 0;
 int SetupCallbacks()
 {
-    int thid = 0;
 
     thid = sceKernelCreateThread("exit_thread", CallbackThread, 0x11, 0xFA0, 0, 0);
 
@@ -392,12 +410,6 @@ void LoadWave()
     }
 }
 
-
-//static char outname[64] = { 0 };
-//static char filetodump[64] = { 0 };
-
-char out[64] = { 0 };
-char fn[64] = { 0 };
 void OnMainMenuSelect(int sel) {
 		if(mode == "Main") {
 				if(sel == 0) {
@@ -409,80 +421,111 @@ void OnMainMenuSelect(int sel) {
 						return;
 					}
 					else {
-						memset(big_buf, 0, sizeof(big_buf));
 						ResetScreen(0, 0, 0);
+						vlfGuiRemoveText(lt);
 						extract = vlfGuiAddText(120, 120, "Extracting... Please Wait...");
+						sceKernelSuspendThread(thid);
 						vlfGuiDrawFrame();
-						// ARK_cIPL
-						char *outname = malloc(64);
-						char *filetodump = malloc(64);
-						for(int i=0;i<sizeof(ark_cipl_files)/sizeof(ark_cipl_files[0]);i++) {
-							memset(filetodump, '\0', sizeof(filetodump));
-							memset(outname, '\0', sizeof(outname));
-							sprintf(filetodump, "ARK_cIPL/%s", ark_cipl_files[i]);
-							sprintf(outname, "ms0:/PSP/GAME/ARK_cIPL/%s", ark_cipl_files[i]);
-							zipFileExtract(path, EBOOT_PSAR, filetodump, outname);
-						}
-
-						// ARK_Loader
-						memset(filetodump, '\0', sizeof(filetodump));
-						memset(outname, '\0', sizeof(outname));
-						strcpy(filetodump, "ARK_Loader/EBOOT.PBP");
-						strcpy(outname, "ms0:/PSP/GAME/ARK_Loader/EBOOT.PBP");
-						zipFileExtract(path, EBOOT_PSAR, filetodump, outname);
-						memset(filetodump, '\0', sizeof(filetodump));
-						memset(outname, '\0', sizeof(outname));
-						strcpy(filetodump, "ARK_Loader/K.BIN");
-						strcpy(outname, "ms0:/PSP/GAME/ARK_Loader/K.BIN");
-						zipFileExtract(path, EBOOT_PSAR, filetodump, outname);
 
 						// ARK_01234
-						for(int j=0;j<sizeof(ark_01234_file)/sizeof(ark_01234_file[0]);j++) {
-							memset(filetodump, '\0', sizeof(filetodump));
-							memset(outname, '\0', sizeof(outname));
-							sprintf(filetodump, "ARK_01234/%s", ark_01234_file[j]);
-							sprintf(outname, "ms0:/PSP/SAVEDATA/ARK_01234/%s", ark_01234_file[j]);
-							zipFileExtract(path, EBOOT_PSAR, filetodump, outname);
+						ARK4_Struct files[] = {
+							{ ark_01234_file[0], ARK4_header, size_ARK4_header },
+							{ ark_01234_file[1], ARK_header, size_ARK_header },
+							{ ark_01234_file[2], ARKX_header, size_ARKX_header },
+							{ ark_01234_file[3], FLASH0_header, size_FLASH0_header },
+							{ ark_01234_file[4], H_header, size_H_header },
+							{ ark_01234_file[5], ICON0_header, size_ICON0_header },
+							{ ark_01234_file[6], IDSREG_header, size_IDSREG_header },
+							{ ark_01234_file[7], K_header, size_K_header },
+							{ ark_01234_file[8], LANG_header, size_LANG_header },
+							{ ark_01234_file[9], MEDIASYN_header, size_MEDIASYN_header },
+							{ ark_01234_file[10], PARAM_header, size_PARAM_header },
+							{ ark_01234_file[11], POPSMAN_header, size_POPSMAN_header },
+							{ ark_01234_file[12], POPS_header, size_POPS_header },
+							{ ark_01234_file[13], PS1SPU_header, size_PS1SPU_header },
+							{ ark_01234_file[14], RECOVERY_header, size_RECOVERY_header },
+							{ ark_01234_file[15], SAVEDATA_header, size_SAVEDATA_header },
+							{ ark_01234_file[16], SETTINGS_header, size_SETTINGS_header },
+							{ ark_01234_file[17], THEME_header, size_THEME_header },
+							{ ark_01234_file[18], UPDATER_header, size_UPDATER_header },
+							{ ark_01234_file[19], USBDEV_header, size_USBDEV_header },
+							{ ark_01234_file[20], VBOOT_header, size_VBOOT_header },
+							{ ark_01234_file[21], VSHMENU_header, size_VSHMENU_header },
+							{ ark_01234_file[22], XBOOT_header, size_XBOOT_header },
+							{ ark_01234_file[23], XMBCTRL_header, size_XMBCTRL_header },
+						};
+
+						int fd = -1;
+						fd = sceIoDopen("ms0:/PSP/SAVEDATA/ARK_01234");
+						if(fd<0) 
+							sceIoMkdir("ms0:/PSP/SAVEDATA/ARK_01234", 0777);
+						else
+							sceIoDclose(fd);
+						// ARK_01234 files due to inflate causing corruption
+						for(int i = 0;i<sizeof(files)/sizeof(files[0]);i++) {
+							sceKernelDcacheWritebackInvalidateRange(files[i].data, files[i].size);
+							int ark_fd = sceIoOpen(files[i].filename, PSP_O_WRONLY | PSP_O_CREAT | PSP_O_TRUNC, 0777);
+							if(ark_fd<0) {
+								ErrorReturn("Failed to open %s!\n", files[i].filename);
+								sceKernelExitGame();
+								return -1;
+							}
+							if(sceIoWrite(ark_fd, files[i].data, files[i].size)<0) {
+								sceIoClose(ark_fd);
+								ErrorReturn("Failed to write %s!\n", files[i].filename);
+								sceKernelExitGame();
+								return -1;
+							}
+							sceIoClose(ark_fd);
+						}
+						// ARK_Full_Installer
+						zipFileExtract(path, EBOOT_PSAR, "ARK_Full_Installer/EBOOT.PBP", "ms0:/PSP/GAME/ARK_Full_Installer/EBOOT.PBP");
+						
+						// ARK_Loader
+						ARK4_Struct ark_loader_files[] = {
+							{"ms0:/PSP/GAME/ARK_Loader/EBOOT.PBP", ARK_Loader_header, size_ARK_Loader_header},
+							{"ms0:/PSP/GAME/ARK_Loader/K.BIN", ARK_K_header, size_ARK_K_header},
+						};
+						fd = sceIoDopen("ms0:/PSP/GAME/ARK_Loader");
+						if(fd<0)
+							sceIoMkdir("ms0:/PSP/GAME/ARK_Loader", 0777);
+						else
+							sceIoDclose(fd);
+						for(int i = 0;i<2;i++) {
+							fd = sceIoOpen(ark_loader_files[i].filename, PSP_O_WRONLY | PSP_O_CREAT | PSP_O_TRUNC, 0777);
+							sceIoWrite(fd, ark_loader_files[i].data, ark_loader_files[i].size);
+							sceIoClose(fd);
 						}
 
-						
-						int fd;
-						fd = sceIoOpen("ms0:/PSP/SAVEDATA/ARK_01234/K.BIN", PSP_O_WRONLY | PSP_O_CREAT | PSP_O_TRUNC, 0777);
-						sceIoWrite(fd, K_header, size_K_header);
-						sceIoClose(fd);
-						fd = sceIoOpen("ms0:/PSP/SAVEDATA/ARK_01234/H.BIN", PSP_O_WRONLY | PSP_O_CREAT | PSP_O_TRUNC, 0777);
-						sceIoWrite(fd, H_header, size_H_header);
-						sceIoClose(fd);
-						fd = sceIoOpen("ms0:/PSP/SAVEDATA/ARK_01234/ARK.BIN", PSP_O_WRONLY | PSP_O_CREAT | PSP_O_TRUNC, 0777);
-						sceIoWrite(fd, ARK_header, size_ARK_header);
-						sceIoClose(fd);
-						fd = sceIoOpen("ms0:/PSP/SAVEDATA/ARK_01234/ARK4.BIN", PSP_O_WRONLY | PSP_O_CREAT | PSP_O_TRUNC, 0777);
-						sceIoWrite(fd, ARK4_header, size_ARK4_header);
-						sceIoClose(fd);
-						fd = sceIoOpen("ms0:/PSP/SAVEDATA/ARK_01234/ARKX.BIN", PSP_O_WRONLY | PSP_O_CREAT | PSP_O_TRUNC, 0777);
-						sceIoWrite(fd, ARKX_header, size_ARKX_header);
-						sceIoClose(fd);
-						fd = sceIoOpen("ms0:/PSP/SAVEDATA/ARK_01234/SAVEDATA.BIN", PSP_O_WRONLY | PSP_O_CREAT | PSP_O_TRUNC, 0777);
-						sceIoWrite(fd, SAVEDATA_header, size_SAVEDATA_header);
-						sceIoClose(fd);
+						// ARK_cIPL
+						ARK4_Struct ark_cipl_files[] = {
+							{"ms0:/PSP/GAME/ARK_cIPL/EBOOT.PBP", ARK_cIPL_header, size_ARK_cIPL_header},
+							{"ms0:/PSP/GAME/ARK_cIPL/ipl_update.prx", ARK_ipl_update_header, size_ARK_ipl_update_header},
+							{"ms0:/PSP/GAME/ARK_cIPL/kbooti_update.prx", ARK_kbooti_update_header, size_ARK_kbooti_update_header},
+							{"ms0:/PSP/GAME/ARK_cIPL/kpspident.prx", ARK_kpspident_header, size_ARK_kpspident_header},
+						};
+						fd = sceIoDopen("ms0:/PSP/GAME/ARK_cIPL");
+						if(fd<0)
+							sceIoMkdir("ms0:/PSP/GAME/ARK_cIPL", 0777);
+						else
+							sceIoDclose(fd);
+						for(int i = 0;i<(sizeof(ark_cipl_files_list)/sizeof(ark_cipl_files_list[0]));i++) {
+							fd = sceIoOpen(ark_cipl_files[i].filename, PSP_O_WRONLY | PSP_O_CREAT | PSP_O_TRUNC, 0777);
+							if(sceIoWrite(fd, ark_cipl_files[i].data, ark_cipl_files[i].size)<0) {
+								sceIoClose(fd);
+								ErrorReturn("Failed to write %s!\n", ark_cipl_files[i].filename);
+								sceKernelExitGame();
+								return -1;
+							}
+							sceIoClose(fd);
+						}
 
-						// ARK_Full_Installer
-						memset(filetodump, '\0', sizeof(filetodump));
-						memset(outname, '\0', sizeof(outname));
-						strcpy(filetodump, "ARK_Full_Installer/EBOOT.PBP");
-						strcpy(outname, "ms0:/PSP/GAME/ARK_Full_Installer/EBOOT.PBP");
-						zipFileExtract(path, EBOOT_PSAR, filetodump, outname);
-
-
-						free(filetodump);
-						free(outname);
 
 
 						// Extracted
 						vlfGuiRemoveText(extract);
-						ErrorReturn("%s successfully installed.", mode);
-						mode = "Main";
-						ResetScreen(1, 0, sel);
+						ErrorReturn("%s successfully installed. Returning to XMB to prevent memory issues.", mode);
+						sceKernelExitGame();
 						return;
 					}
 				}
@@ -494,7 +537,9 @@ void OnMainMenuSelect(int sel) {
 						cont = vlfGuiMessageDialog("Do you want to extract 6.61 GO OFW to PSP/GAME/UPDATE/ ?", VLF_MD_TYPE_NORMAL|VLF_MD_BUTTONS_YESNO|VLF_MD_INITIAL_CURSOR_NO);
 						if(cont == 1) {
 							ResetScreen(0, 0, 0);
+							vlfGuiRemoveText(lt);
 							extract = vlfGuiAddText(120, 120, "Extracting... Please Wait...");
+							sceKernelSuspendThread(thid);
 							char *outname = malloc(64);
 							char *filetodump = malloc(64);
 							memset(big_buf, 0, sizeof(big_buf));
@@ -505,12 +550,14 @@ void OnMainMenuSelect(int sel) {
 							strcpy(filetodump, "OFW/GO/GO661.PBP");
 							strcpy(outname, "ms0:/PSP/GAME/UPDATE/EBOOT.PBP");
 							zipFileExtract(path, EBOOT_PSAR, filetodump, outname);
+							//int fd = sceIoOpen("ms0:/PSP/GAME/UPDATE/EBOOT.PBP", PSP_O_WRONLY | PSP_O_CREAT | PSP_O_TRUNC, 0777);
+							//sceIoWrite(fd, ofw_go_header, size_ofw_go_header);
+							//sceIoClose(fd);
 						    vlfGuiRemoveText(extract);
-							ErrorReturn("%s successfully installed.", mode);
+							ErrorReturn("%s successfully installed. Returning to XMB to prevent memory issues.", mode);
 							free(filetodump);
 							free(outname);
-							mode = "Main";
-							ResetScreen(1, 0, sel);
+							sceKernelExitGame();
 							return;
 						}
 						else {
@@ -530,15 +577,19 @@ void OnMainMenuSelect(int sel) {
 							strcpy(filetodump, "OFW/X000/EBOOT.PBP");
 							strcpy(outname, "ms0:/PSP/GAME/UPDATE/EBOOT.PBP");
 							ResetScreen(0, 0, 0);
+							vlfGuiRemoveText(lt);
 							extract = vlfGuiAddText(120, 120, "Extracting... Please Wait...");
+							sceKernelSuspendThread(thid);
 							vlfGuiDrawFrame();
 							zipFileExtract(path, EBOOT_PSAR, filetodump, outname);
+							//int fd = sceIoOpen("ms0:/PSP/GAME/UPDATE/EBOOT.PBP", PSP_O_WRONLY | PSP_O_CREAT | PSP_O_TRUNC, 0777);
+							//sceIoWrite(fd, ofw_x000_header, size_ofw_x000_header);
+							//sceIoClose(fd);
 						    vlfGuiRemoveText(extract);
-							ErrorReturn("%s successfully installed.", mode);
-							mode = "Main";
+							ErrorReturn("%s successfully installed. Returning to XMB to prevent memory issues.", mode);
 							free(filetodump);
 							free(outname);
-							ResetScreen(1, 0, sel);
+							sceKernelExitGame();
 							return;
 						}
 						else {
@@ -558,7 +609,7 @@ void OnMainMenuSelect(int sel) {
 							return;
 						}
 						else {
-							char *outname = malloc(64);
+							/*char *outname = malloc(64);
 							char *filetodump = malloc(64);
 							memset(big_buf, 0, sizeof(big_buf));
 							memset(filetodump, 0, sizeof(filetodump));
@@ -566,11 +617,20 @@ void OnMainMenuSelect(int sel) {
 							strcpy(filetodump, "chronoswitch/EBOOT.PBP");
 							strcpy(outname, "ms0:/PSP/GAME/ChronoSwitch/EBOOT.PBP");
 							zipFileExtract(path, EBOOT_PSAR, filetodump, outname);
-							ErrorReturn("%s successfully installed.", mode);
-							mode = "Main";
-							free(filetodump);
-							free(outname);
-							ResetScreen(1, 0, sel);
+							*/
+							int fd = sceIoDopen("ms0:/PSP/GAME/ChronoSwitch");
+							if(fd<0)
+								sceIoMkdir("ms0:/PSP/GAME/ChronoSwitch", 0777);
+							else
+								sceIoDclose(fd);
+
+							fd = sceIoOpen("ms0:/PSP/GAME/ChronoSwitch/EBOOT.PBP", PSP_O_WRONLY | PSP_O_CREAT | PSP_O_TRUNC, 0777);
+							sceIoWrite(fd, chronoswitch_header, size_chronoswitch_header);
+							sceIoClose(fd);
+							ErrorReturn("%s successfully installed. Returning to XMB to prevent memory issues.", mode);
+							//free(filetodump);
+							//free(outname);
+							sceKernelExitGame();
 							return;
 						}
 					
