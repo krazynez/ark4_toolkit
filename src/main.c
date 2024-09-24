@@ -1,6 +1,7 @@
 #include <pspsdk.h>
 #include <pspinit.h>
 #include <pspkernel.h>
+#include <psploadexec_kernel.h>
 #include <pspctrl.h>
 #include <zlib.h>
 #include <stdarg.h>
@@ -16,7 +17,7 @@
 #include "ARK4_HEADERS.h"
 #define vlf_text_items 20
 
-PSP_MODULE_INFO("ARK-4 Toolkit", 0, 1, 0);
+PSP_MODULE_INFO("ARK-4 Toolkit", 0x200, 1, 1);
 PSP_MAIN_THREAD_ATTR(0);
 
 int showback_prev = 0;
@@ -112,8 +113,6 @@ int WriteFile(char *file, int seek, char *buf, int size)
 int zipFileExtract(char *archivepath, int archiveoffs, char *filename, char *outputpath) {
     struct SZIPFileHeader data;
 	int CHUNK_SIZE = 512;
-	//if(strstr(outputpath, "UPDATE"))
-		//CHUNK_SIZE = 16384;  // 512B buffer size
     char foundfilename[CHUNK_SIZE];
     u8 *cbuffer;
     u8 outbuf[CHUNK_SIZE];  // Output buffer for decompressed data
@@ -524,9 +523,30 @@ void OnMainMenuSelect(int sel) {
 
 						// Extracted
 						vlfGuiRemoveText(extract);
-						ErrorReturn("%s successfully installed. Returning to XMB to prevent memory issues.", mode);
-						sceKernelExitGame();
-						return;
+						ErrorReturn("%s successfully installed.", mode);
+						int autolaunch = vlfGuiMessageDialog("Would you like to auto launch ARK Loader now?", VLF_MD_TYPE_NORMAL|VLF_MD_BUTTONS_YESNO|VLF_MD_INITIAL_CURSOR_NO);
+						if(autolaunch == 1) {
+							char menupath[] = "ms0:/PSP/GAME/ARK_Loader/EBOOT.PBP";
+							if(strstr(path, "ef0")) {
+								menupath[0] = 'e';
+								menupath[1] = 'f';
+							}
+							struct SceKernelLoadExecVSHParam param;
+							memset(&param, 0, sizeof(param));
+							param.size = sizeof(param);
+							param.args = strlen(menupath) + 1;
+							param.argp = menupath;
+							param.key = "game";
+						    sctrlKernelLoadExecVSHWithApitype(0x141, menupath, &param);
+							sceKernelExitGame();
+						}
+						else {
+							sceKernelResumeThread(thid);
+    						lt = vlfGuiAddText(310, 250, "LT change bg color");
+							mode = "Main";
+							ResetScreen(1, 0, sel);
+							return;
+						}
 					}
 				}
 				else if(sel == 1) {
@@ -550,9 +570,6 @@ void OnMainMenuSelect(int sel) {
 							strcpy(filetodump, "OFW/GO/GO661.PBP");
 							strcpy(outname, "ms0:/PSP/GAME/UPDATE/EBOOT.PBP");
 							zipFileExtract(path, EBOOT_PSAR, filetodump, outname);
-							//int fd = sceIoOpen("ms0:/PSP/GAME/UPDATE/EBOOT.PBP", PSP_O_WRONLY | PSP_O_CREAT | PSP_O_TRUNC, 0777);
-							//sceIoWrite(fd, ofw_go_header, size_ofw_go_header);
-							//sceIoClose(fd);
 						    vlfGuiRemoveText(extract);
 							ErrorReturn("%s successfully installed. Returning to XMB to prevent memory issues.", mode);
 							free(filetodump);
@@ -582,9 +599,6 @@ void OnMainMenuSelect(int sel) {
 							sceKernelSuspendThread(thid);
 							vlfGuiDrawFrame();
 							zipFileExtract(path, EBOOT_PSAR, filetodump, outname);
-							//int fd = sceIoOpen("ms0:/PSP/GAME/UPDATE/EBOOT.PBP", PSP_O_WRONLY | PSP_O_CREAT | PSP_O_TRUNC, 0777);
-							//sceIoWrite(fd, ofw_x000_header, size_ofw_x000_header);
-							//sceIoClose(fd);
 						    vlfGuiRemoveText(extract);
 							ErrorReturn("%s successfully installed. Returning to XMB to prevent memory issues.", mode);
 							free(filetodump);
@@ -609,15 +623,9 @@ void OnMainMenuSelect(int sel) {
 							return;
 						}
 						else {
-							/*char *outname = malloc(64);
-							char *filetodump = malloc(64);
-							memset(big_buf, 0, sizeof(big_buf));
-							memset(filetodump, 0, sizeof(filetodump));
-							memset(outname, 0, sizeof(outname));
-							strcpy(filetodump, "chronoswitch/EBOOT.PBP");
-							strcpy(outname, "ms0:/PSP/GAME/ChronoSwitch/EBOOT.PBP");
-							zipFileExtract(path, EBOOT_PSAR, filetodump, outname);
-							*/
+							ResetScreen(0, 0, 0);
+							extract = vlfGuiAddText(120, 120, "Extracting... Please Wait...");
+							sceKernelSuspendThread(thid);
 							int fd = sceIoDopen("ms0:/PSP/GAME/ChronoSwitch");
 							if(fd<0)
 								sceIoMkdir("ms0:/PSP/GAME/ChronoSwitch", 0777);
@@ -627,10 +635,12 @@ void OnMainMenuSelect(int sel) {
 							fd = sceIoOpen("ms0:/PSP/GAME/ChronoSwitch/EBOOT.PBP", PSP_O_WRONLY | PSP_O_CREAT | PSP_O_TRUNC, 0777);
 							sceIoWrite(fd, chronoswitch_header, size_chronoswitch_header);
 							sceIoClose(fd);
-							ErrorReturn("%s successfully installed. Returning to XMB to prevent memory issues.", mode);
-							//free(filetodump);
-							//free(outname);
-							sceKernelExitGame();
+						    vlfGuiRemoveText(extract);
+							sceKernelResumeThread(thid);
+							ErrorReturn("%s successfully installed.", mode);
+							mode = "Main";
+    						lt = vlfGuiAddText(310, 250, "LT change bg color");
+							ResetScreen(1, 0, sel);
 							return;
 						}
 					
@@ -658,13 +668,7 @@ void MainMenu(int sel) {
 }
 void ResetScreen(int showmenu, int showback, int sel)
 {
-    //int i;
-
-    //for(i = 0; i < vlf_text_items; i++){if(vlf_texts[i] != NULL){vlf_texts[i] = vlfGuiRemoveText(vlf_texts[i]);}}
-    //if(vlf_picture != NULL){vlf_picture = vlfGuiRemovePicture(vlf_picture);}
-    //if(vlf_progressbar != NULL){vlf_progressbar = vlfGuiRemoveProgressBar(vlf_progressbar);}
     vlfGuiCancelCentralMenu();
-    //if((vlfGuiGetButtonConfig() && showback_prev) || (!vlfGuiGetButtonConfig() && showenter_prev)){vlfGuiCancelBottomDialog();showback_prev = 0;showenter_prev = 0;} 
     
     if(showmenu==1){MainMenu(sel);}
 }

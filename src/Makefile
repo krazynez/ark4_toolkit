@@ -28,7 +28,7 @@ BUILD_PRX = 1
 PSP_FW_VERSION = 271
 
 LIBDIR += ./libs
-LIBS = -lz -lpspctrl -lvlfgui -lvlfgu -lvlfutils -lvlflibc -lpsprtc -lpspkubridge
+LIBS = -lz -lpspctrl -lvlfgui -lvlfgu -lvlfutils -lvlflibc -lpsprtc -lpspkubridge -lpspsystemctrl_user
 
 
 PSPSDK = $(shell psp-config -p)
