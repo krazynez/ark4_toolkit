@@ -12,7 +12,7 @@ __Projects include:__
 
 ## ARK-4 running steps
 
-1. Be on OFW 6.6X
+1. Be on OFW 6.6X ( with some kind of live CFW to run ARK4 Toolkit )
 2. ARK Loader
 3. ARK cIPL
 4. ARK Full Flash Installer
